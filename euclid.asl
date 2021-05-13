@@ -17,6 +17,7 @@ startup
     vars.startAndReset = false;
     vars.doSplit = false;
     vars.knownCompletedPuzzles = 0;
+    vars.hasLeftIntro = false;
 }
 
 init
@@ -73,11 +74,14 @@ init
 update
 {
     vars.watchers.UpdateAll(game);
-    vars.startAndReset = (vars.spawnMsg.Current == "Relativity" && vars.spawnTimer.Current < vars.spawnTimer.Old);
+    vars.startAndReset = (vars.spawnMsg.Current == "Relativity" && vars.spawnTimer.Current < vars.spawnTimer.Old && !vars.hasLeftIntro);
 
     vars.doSplit = vars.puzzlesCompleted.Current > vars.knownCompletedPuzzles;
     if(vars.doSplit)
         vars.knownCompletedPuzzles = vars.puzzlesCompleted.Current;
+
+    if(!vars.hasLeftIntro && !String.IsNullOrEmpty(vars.spawnMsg.Current) && vars.spawnMsg.Current != "Relativity")
+        vars.hasLeftIntro = true;
 }
 
 split
@@ -88,6 +92,7 @@ split
 start
 {
     vars.knownCompletedPuzzles = 0;
+    vars.hasLeftIntro = false;
     return vars.startAndReset;
 }
 
