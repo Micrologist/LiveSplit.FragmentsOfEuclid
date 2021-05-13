@@ -76,7 +76,7 @@ update
 
 split
 {
-    return (vars.currentMusic.Current == 0 && vars.currentMusic.Old == 1 && current.map == "Assets/Scenes/EndingTest.unity") || (vars.puzzlesCompleted.Current > vars.puzzlesCompleted.Old && current.map == "Assets/Scenes/LightmapTest01.unity");
+    return (vars.currentMusic.Current == 0 && vars.currentMusic.Old == 1 && current.map == "Assets/Scenes/EndingTest.unity") || (vars.puzzlesCompleted.Current == vars.puzzlesCompleted.Old+1 && current.map == "Assets/Scenes/LightmapTest01.unity");
 }
 
 start
