@@ -15,6 +15,8 @@ startup
     */
     vars.scanCooldown = new Stopwatch();
     vars.startAndReset = false;
+    vars.doSplit = false;
+    vars.knownCompletedPuzzles = 0;
 }
 
 init
@@ -72,15 +74,20 @@ update
 {
     vars.watchers.UpdateAll(game);
     vars.startAndReset = (vars.spawnMsg.Current == "Relativity" && vars.spawnTimer.Current < vars.spawnTimer.Old);
+
+    vars.doSplit = vars.puzzlesCompleted.Current > vars.knownCompletedPuzzles;
+    if(vars.doSplit)
+        vars.knownCompletedPuzzles = vars.puzzlesCompleted.Current;
 }
 
 split
 {
-    return (vars.currentMusic.Current == 0 && vars.currentMusic.Old == 1 && current.map == "Assets/Scenes/EndingTest.unity") || (vars.puzzlesCompleted.Current == vars.puzzlesCompleted.Old+1 && current.map == "Assets/Scenes/LightmapTest01.unity");
+    return (vars.currentMusic.Current == 0 && vars.currentMusic.Old == 1 && current.map == "Assets/Scenes/EndingTest.unity") || vars.doSplit;
 }
 
 start
 {
+    vars.knownCompletedPuzzles = 0;
     return vars.startAndReset;
 }
 
