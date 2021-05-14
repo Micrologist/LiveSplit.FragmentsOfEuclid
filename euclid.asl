@@ -14,17 +14,19 @@ startup
 	timer.OnReset += vars.TimerReset;
 	vars.TimerReset(null, timer.CurrentPhase);
 
-	vars.SigsFound = false;
+	
 }
 
 init
 {
 	bool Is64Bit = game.Is64Bit();
-
+	vars.SigsFound = false;
+	vars.TokenSource = new CancellationTokenSource();
+	
 	vars.SigThread = new Thread(() =>
 	{
 		vars.Dbg("Starting signature thread.");
-		vars.TokenSource = new CancellationTokenSource();
+		
 		var FoEModule = modules.First();
 		var FoEScanner = new SignatureScanner(game, FoEModule.BaseAddress, FoEModule.ModuleMemorySize);
 
