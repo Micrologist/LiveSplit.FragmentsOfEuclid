@@ -1,102 +1,155 @@
-state("FragmentsOfEuclid")
-{ 
-    string250 map : 0x01345260, 0x28, 0x8, 0x0;
-}
+//Fragments of Euclic Autosplitter
+//by Micrologist & Ero
+
+state("FragmentsofEuclid") {}
 
 startup
 {
-    vars.portalManagerTarget = new SigScanTarget("48 C7 86 88 00 00 00 00 00 00 00 B8 ?? ?? ?? ?? 48 89 30 B9 ?? ?? ?? ?? 48 83 EC 20");
-    /*
-    PortalManager:Awake+15b - 48 C7 86 88000000 00000000 - mov qword ptr [rsi+00000088],00000000
-    PortalManager:Awake+166 - B8 C0BCB304           - mov eax,04B3BCC0 <-- Pointer
-    PortalManager:Awake+16b - 48 89 30              - mov [rax],rsi
-    PortalManager:Awake+16e - B9 E0F6FD13           - mov ecx,13FDF6E0
-    PortalManager:Awake+173 - 48 83 EC 20           - sub rsp,20
-    */
-    vars.scanCooldown = new Stopwatch();
-    vars.startAndReset = false;
-    vars.doSplit = false;
-    vars.knownCompletedPuzzles = 0;
-    vars.hasLeftIntro = false;
+	vars.Dbg = (Action<dynamic>) ((output) => print("[FoE ASL] " + output.ToString()));
+	vars.TimerReset = (LiveSplit.Model.Input.EventHandlerT<TimerPhase>) ((s, e) =>
+	{
+		vars.KnownPuzzlesDone = 0;
+		vars.HasLeftIntro = false;
+	});
+	timer.OnReset += vars.TimerReset;
+	vars.TimerReset(null, timer.CurrentPhase);
+
+	vars.SigsFound = false;
 }
 
 init
 {
-    var portalInstancePtr = IntPtr.Zero;
+	bool Is64Bit = game.Is64Bit();
 
-    if(!vars.scanCooldown.IsRunning)
-    {
-        vars.scanCooldown.Start(); 
-    }
+	vars.SigThread = new Thread(() =>
+	{
+		vars.Dbg("Starting signature thread.");
+		vars.TokenSource = new CancellationTokenSource();
+		var FoEModule = modules.First();
+		var FoEScanner = new SignatureScanner(game, FoEModule.BaseAddress, FoEModule.ModuleMemorySize);
 
-     if(vars.scanCooldown.Elapsed.TotalMilliseconds >= 1000) 
-    {
-        print("scanning");
-        foreach (var page in game.MemoryPages(true))
-        {
-            var scanner = new SignatureScanner(game, page.BaseAddress, (int)page.RegionSize);
-            portalInstancePtr = scanner.Scan(vars.portalManagerTarget);
-            if(portalInstancePtr != IntPtr.Zero)
-                break;
-        }
+		var PortalManager = IntPtr.Zero;
+		var PortalManagerSig =
+			Is64Bit
+			? new SigScanTarget("4C 89 25 ???????? 48 83") { OnFound = (p, s, ptr) => IntPtr.Add(ptr + 7, p.ReadValue<int>(ptr + 3)) }
+			: new SigScanTarget(9, "55 8B EC 8B 45 ?? 8B 04 85 ???????? 5D C3 CC 55 8B EC 8B 45 ?? 8B 4D ?? 89") { OnFound = (p, s, ptr) => p.ReadPointer(ptr) + 4 };
 
-        if(portalInstancePtr == IntPtr.Zero) 
-        {
-            vars.scanCooldown.Restart();
-            throw new Exception("pointers not found - resetting");
-        }
-        else 
-        {
-            vars.scanCooldown.Reset();
-        }
-    }
-    else 
-    {
-        throw new Exception("init not ready");
-    }
+		var SceneManager = IntPtr.Zero;
+		var SceneManagerSig =
+			Is64Bit
+			? new SigScanTarget("48 8B 3D ???????? 33 DB 48 8B F1 39") { OnFound = (p, s, ptr) => IntPtr.Add(ptr + 7, p.ReadValue<int>(ptr + 3)) }
+			: new SigScanTarget(1, "A1 ???????? 56 57 33 F6") { OnFound = (p, s, ptr) => p.ReadPointer(ptr) };
 
-    print((portalInstancePtr+0xC).ToString("X16"));
-    var finishGameDP = new DeepPointer(portalInstancePtr+0xC, DeepPointer.DerefType.Bit32, 0x0, 0x1E4);
-    vars.finishGame = new MemoryWatcher<bool>(finishGameDP);
-    var lastCamPosDP = new DeepPointer(portalInstancePtr+0xC, DeepPointer.DerefType.Bit32, 0x0, 0x200);
-    vars.lastCamPos = new MemoryWatcher<int>(lastCamPosDP);
-    var spawnMessageDP = new DeepPointer(portalInstancePtr+0xC, DeepPointer.DerefType.Bit32, 0x0, 0x88, 0x20, 0x14);
-    vars.spawnMsg = new StringWatcher(spawnMessageDP, 200);
-    var spawnTimerDP = new DeepPointer(portalInstancePtr+0xC, DeepPointer.DerefType.Bit32, 0x0, 0x214);
-    vars.spawnTimer = new MemoryWatcher<float>(spawnTimerDP);
-    var currentMusicDP = new DeepPointer(portalInstancePtr+0xC, DeepPointer.DerefType.Bit32, 0x0, 0x268);
-    vars.currentMusic = new MemoryWatcher<int>(currentMusicDP);
-    var numPuzzleCompleteDP = new DeepPointer(portalInstancePtr+0xC, DeepPointer.DerefType.Bit32, 0x0, 0x1E0);
-    vars.puzzlesCompleted = new MemoryWatcher<int>(numPuzzleCompleteDP);
-    vars.watchers = new MemoryWatcherList() {vars.finishGame, vars.lastCamPos, vars.spawnMsg, vars.spawnTimer, vars.currentMusic, vars.puzzlesCompleted};
+		var Token = vars.TokenSource.Token;
+		while (!Token.IsCancellationRequested)
+		{
+			if (PortalManager == IntPtr.Zero && (PortalManager = FoEScanner.Scan(PortalManagerSig)) != IntPtr.Zero)
+				vars.Dbg("Found PortalManager: 0x" + PortalManager.ToString("X"));
+
+			if (SceneManager == IntPtr.Zero && (SceneManager = FoEScanner.Scan(SceneManagerSig)) != IntPtr.Zero)
+				vars.Dbg("Found SceneManager: 0x" + SceneManager.ToString("X"));
+
+			if (!(vars.SigsFound = new[] { PortalManager, SceneManager }.All(ptr => ptr != IntPtr.Zero)))
+			{
+				Thread.Sleep(2000);
+				FoEScanner.Address = FoEModule.BaseAddress;
+				FoEScanner.Size = FoEModule.ModuleMemorySize;
+				continue;
+			}
+			else
+			{
+				Func<int[], DeepPointer> dPtrArr = (finalOffsets) =>
+				{
+					var baseOffsets = Is64Bit ? new[] { 0x48, 0x4A0, 0x0, 0x18, 0x0 } : new[] { 0x194, 0x38, 0xED0, 0xC, 0x0 };
+					return new DeepPointer(PortalManager, baseOffsets.Concat(finalOffsets).ToArray());
+				};
+				Func<int, DeepPointer> dPtr = (finalOffset) => dPtrArr(new[] { finalOffset });
+
+				var SpawnMessagePtr = dPtrArr(Is64Bit ? new[] { 0xF8, 0x14 } : new[] { 0x7C, 0xC });
+				var NumPuzzleCompletePtr = dPtr(Is64Bit ? 0x1E0 : 0x118);
+				// var FinishGamePtr = dPtr(Is64Bit ? 0x1E4 : 0x11C);
+				// var LastCameraLocationPtr = dPtr(Is64Bit ? 0x200 : 0x138);
+				var SpawnMessageTimerPtr = dPtr(Is64Bit ? 0x214 : 0x14C);
+				var CurrentMusicPtr = dPtr(Is64Bit ? 0x268 : 0x1A0);
+
+				vars.Watchers = new MemoryWatcherList
+				{
+					new StringWatcher(SpawnMessagePtr, 128) { Name = "SpawnMessage" },
+					new MemoryWatcher<int>(NumPuzzleCompletePtr) { Name = "NumPuzzleComplete" },
+					// new MemoryWatcher<bool>(FinishGamePtr) { Name = "FinishGame" },
+					// new MemoryWatcher<Vector3f>(LastCameraLocationPtr) { Name = "LastCameraLocation" },
+					new MemoryWatcher<float>(SpawnMessageTimerPtr) { Name = "SpawnMessageTimer" },
+					new MemoryWatcher<int>(CurrentMusicPtr) { Name = "CurrentMusic" }
+				};
+
+				Func<string, string> PathToName = (path) =>
+				{
+					if (String.IsNullOrEmpty(path)) return null;
+
+					int from = path.LastIndexOf('/') + 1;
+					int to = path.LastIndexOf(".unity");
+					return path.Substring(from, to - from);
+				};
+
+				old.Scene = "";
+				vars.UpdateScene = (Action) (() =>
+				{
+					string path = new DeepPointer(SceneManager, Is64Bit ? 0x28 : 0x14, Is64Bit ? 0x8 : 0x4, 0x0).DerefString(game, 256);
+					current.Scene = PathToName(path) ?? old.Scene;
+				});
+				break;
+			}
+		}
+
+		vars.Dbg("Exiting signature thread.");
+	});
+	vars.SigThread.Start();
 }
 
 update
 {
-    vars.watchers.UpdateAll(game);
-    vars.startAndReset = (vars.spawnMsg.Current == "Relativity" && vars.spawnTimer.Current < vars.spawnTimer.Old && !vars.hasLeftIntro);
+	if (!vars.SigsFound) return false;
+	vars.Watchers.UpdateAll(game);
 
-    vars.doSplit = vars.puzzlesCompleted.Current > vars.knownCompletedPuzzles;
-    if(vars.doSplit)
-        vars.knownCompletedPuzzles = vars.puzzlesCompleted.Current;
+	vars.UpdateScene();
+	current.SpawnMsg = vars.Watchers["SpawnMessage"].Current;
+	current.PuzzlesDone = vars.Watchers["NumPuzzleComplete"].Current;
+	current.MsgTimer = vars.Watchers["SpawnMessageTimer"].Current;
+	current.Music = vars.Watchers["CurrentMusic"].Current;
 
-    if(!vars.hasLeftIntro && !String.IsNullOrEmpty(vars.spawnMsg.Current) && vars.spawnMsg.Current != "Relativity")
-        vars.hasLeftIntro = true;
-}
-
-split
-{
-    return (vars.currentMusic.Current == 0 && vars.currentMusic.Old == 1 && current.map == "Assets/Scenes/EndingTest.unity") || vars.doSplit;
+	if (timer.CurrentPhase == TimerPhase.Running && !vars.HasLeftIntro && current.SpawnMsg != "Relativity" && !String.IsNullOrEmpty(current.SpawnMsg))
+		vars.HasLeftIntro = true;
 }
 
 start
 {
-    vars.knownCompletedPuzzles = 0;
-    vars.hasLeftIntro = false;
-    return vars.startAndReset;
+	return !vars.HasLeftIntro && old.MsgTimer > current.MsgTimer && current.MsgTimer < 0.1f;
+}
+
+split
+{
+	if (current.PuzzlesDone > vars.KnownPuzzlesDone)
+	{
+		vars.KnownPuzzlesDone = current.PuzzlesDone;
+		return true;
+	}
+
+	return old.Music == 1 && current.Music == 0 && current.Scene == "EndingTest";
 }
 
 reset
 {
-    return vars.startAndReset || current.map == "Assets/Scenes/TitleScene2.unity";
+	return !vars.HasLeftIntro && old.MsgTimer > current.MsgTimer && current.MsgTimer < 0.1f ||
+	       old.Scene != "TitleScene2" && current.Scene == "TitleScene2";
+}
+
+exit
+{
+	vars.TokenSource.Cancel();
+}
+
+shutdown
+{
+	vars.TokenSource.Cancel();
+	timer.OnReset -= vars.TimerReset;
 }
