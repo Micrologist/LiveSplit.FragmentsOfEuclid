@@ -130,6 +130,11 @@ start
 
 split
 {
+	if(current.PuzzlesDone == 0 && current.SpawnMsg == "A small step" && old.SpawnMsg == "Side reaching")
+	{
+		return true;
+	}
+
 	if (current.PuzzlesDone > vars.KnownPuzzlesDone)
 	{
 		vars.KnownPuzzlesDone = current.PuzzlesDone;
